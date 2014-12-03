@@ -1,16 +1,21 @@
 //index.js/
-var express = require('express'),
-    exphbs = require('express-handlebars'),
-    logger = require('morgan'),
-    cookieParser = require('cookie-parser'),
-    bodyParser = require('body-parser'),
-    methodOverride = require('method-override'),
-    session = require('express-session'),
-    passport = require('passport'),
-    LocalStrategy = require('passport-local'),
-    TwitterStrategy = require('passport-twitter'),
-    GoogleStrategy = require('passport-google'),
-    FacebookStrategy = require('passport-facebook');
+var express             = require('express'),
+    exphbs              = require('express-handlebars'),
+    logger              = require('morgan'),
+    cookieParser        = require('cookie-parser'),
+    bodyParser          = require('body-parser'),
+    methodOverride      = require('method-override'),
+    session             = require('express-session'),
+    passport            = require('passport'),
+    LocalStrategy       = require('passport-local'),
+    TwitterStrategy     = require('passport-twitter'),
+    GoogleStrategy      = require('passport-google'),
+    FacebookStrategy    = require('passport-facebook');
+
+// New Code
+var mongo = require('mongodb');
+var monk = require('monk');
+var db = monk('localhost:27017/nodetest1');
 
 //We will be creating these two files shortly
  var config = require('./config.js'), //config file contains all tokens and other private info
@@ -23,47 +28,45 @@ var app = express();
 //===============PASSPORT=================
 // Use the LocalStrategy within Passport to login/”signin” users.
 passport.use('local-signin', new LocalStrategy(
-  {passReqToCallback : true}, //allows us to pass back the request to the callback
-  function(req, username, password, done) {
-    funct.localAuth(username, password)
-    .then(function (user) {
-      if (user) {
-        console.log("LOGGED IN AS: " + user.username);
-        req.session.success = 'You are successfully logged in ' + user.username + '!';
-        done(null, user);
-      }
-      if (!user) {
-        console.log("COULD NOT LOG IN");
-        req.session.error = 'Could not log user in. Please try again.'; //inform user could not log them in
-        done(null, user);
-      }
-    })
-    .fail(function (err){
-      console.log(err.body);
-    });
-  }
+    {passReqToCallback : true}, //allows us to pass back the request to the callback
+    function(req, username, password, done) {
+        funct.localAuth(username, password)
+            .then(function (user) {
+                if (user) {
+                    console.log("LOGGED IN AS: " + user.username);
+                    req.session.success = 'You are successfully logged in ' + user.username + '!';
+                    done(null, user);
+                }
+                if (!user) {
+                    console.log("COULD NOT LOG IN");
+                    req.session.error = 'Could not log user in. Please try again.'; //inform user could not log them in
+                    done(null, user);
+                }
+        }).fail(function (err){
+            console.log(err.body);
+        });
+    }
 ));
 // Use the LocalStrategy within Passport to register/"signup" users.
 passport.use('local-signup', new LocalStrategy(
-  {passReqToCallback : true}, //allows us to pass back the request to the callback
-  function(req, username, password, done) {
-    funct.localReg(username, password)
-    .then(function (user) {
-      if (user) {
-        console.log("REGISTERED: " + user.username);
-        req.session.success = 'You are successfully registered and logged in ' + user.username + '!';
-        done(null, user);
-      }
-      if (!user) {
-        console.log("COULD NOT REGISTER");
-        req.session.error = 'That username is already in use, please try a different one.'; //inform user could not log them in
-        done(null, user);
-      }
-    })
-    .fail(function (err){
-      console.log(err.body);
-    });
-  }
+    {passReqToCallback : true}, //allows us to pass back the request to the callback
+    function(req, username, password, done) {
+        funct.localReg(username, password)
+            .then(function (user) {
+                if (user) {
+                    console.log("REGISTERED: " + user.username);
+                    req.session.success = 'You are successfully registered and logged in ' + user.username + '!';
+                    done(null, user);
+                }
+                if (!user) {
+                    console.log("COULD NOT REGISTER");
+                    req.session.error = 'That username is already in use, please try a different one.'; //inform user could not log them in
+                    done(null, user);
+                }
+        }).fail(function (err){
+            console.log(err.body);
+        });
+    }
 ));
 
 //===============EXPRESS================
@@ -79,64 +82,75 @@ app.use(passport.session());
 
 // Session-persisted message middleware
 app.use(function(req, res, next){
-  var err = req.session.error,
-      msg = req.session.notice,
-      success = req.session.success;
+    var err = req.session.error,
+        msg = req.session.notice,
+        success = req.session.success;
 
-  delete req.session.error;
-  delete req.session.success;
-  delete req.session.notice;
+    delete req.session.error;
+    delete req.session.success;
+    delete req.session.notice;
+    
+    req.db = db;
+    
+    if (err) res.locals.error = err;
+    if (msg) res.locals.notice = msg;
+    if (success) res.locals.success = success;
 
-  if (err) res.locals.error = err;
-  if (msg) res.locals.notice = msg;
-  if (success) res.locals.success = success;
-
-  next();
+    next();
 });
 
 // Configure express to use handlebars templates
 var hbs = exphbs.create({
     defaultLayout: 'main', //we will be creating this layout shortly
 });
+
 app.engine('handlebars', hbs.engine);
 app.set('view engine', 'handlebars');
 
 //===============ROUTES===============
 
-//This section will hold our Routes
-
-//===============ROUTES=================
 //displays our homepage
 app.get('/', function(req, res){
-  res.render('home', {user: req.user});
+    res.render('home', {user: req.user});
+});
+
+/* GET Userlist page. */
+app.get('/list', function(req, res) {
+    var db = req.db;
+    var collection = db.get('trips');
+    collection.find({},{},function(e,docs){
+        res.render('list', {
+            "list" : docs
+        });
+    });
 });
 
 //displays our signup page
 app.get('/signin', function(req, res){
-  res.render('signin');
+    res.render('signin');
 });
 
 //sends the request through our local signup strategy, and if successful takes user to homepage, otherwise returns then to signin page
 app.post('/local-reg', passport.authenticate('local-signup', {
-  successRedirect: '/',
-  failureRedirect: '/signin'
-  })
+        successRedirect: '/',
+        failureRedirect: '/signin'
+    })
 );
 
 //sends the request through our local login/signin strategy, and if successful takes user to homepage, otherwise returns then to signin page
 app.post('/login', passport.authenticate('local-signin', { 
-  successRedirect: '/',
-  failureRedirect: '/signin'
-  })
+        successRedirect: '/',
+        failureRedirect: '/signin'
+    })
 );
 
 //logs user out of site, deleting them from the session, and returns to homepage
 app.get('/logout', function(req, res){
-  var name = req.user.username;
-  console.log("LOGGIN OUT " + req.user.username)
-  req.logout();
-  res.redirect('/');
-  req.session.notice = "You have successfully been logged out " + name + "!";
+    var name = req.user.username;
+    console.log("LOGGIN OUT " + req.user.username)
+    req.logout();
+    res.redirect('/');
+    req.session.notice = "You have successfully been logged out " + name + "!";
 });
 
 //===============PORT=================
