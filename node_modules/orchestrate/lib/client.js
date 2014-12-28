@@ -13,8 +13,8 @@ var SearchBuilder = require('./search')
 var parseLinks = require('parse-link-header')
 var GraphBuilder = require('./graph')
 var EventBuilder = require('./event')
+var PatchBuilder = require('./patch')
 var pjson = require('../package.json')
-
 
 /**
  * Creates an instance of Client which can be used to access
@@ -142,16 +142,33 @@ Client.prototype.put = function (collection, key, data, match) {
 
 
 /**
- * Update a sub-document by key value.
+ * Merge a JSON document into an existing key
  * @param {string} collection
  * @param {string} key
  * @param {Object} data
+ * @param {string} match ETag string (optional)
  * @return {Promise}
  */
-Client.prototype.patch = function (collection, key, data) {
+Client.prototype.merge = function (collection, key, data, match) {
   assert(collection && key && data, 'Collection, key and JSON object required.')
   var header = {'Content-Type': 'application/merge-patch+json'}
+  if (typeof match == 'string') header['If-Match'] = this._quote(match)
   return this._patch(this.generateApiUrl([collection, key]), data, header)
+}
+
+/**
+ * Patch a JSON document using a specific set of operations
+ * @param {string} collection
+ * @param {string} key
+ * @param {[Object]} patchOps array of operations; see http://orchestrate.io/docs/apiref#keyvalue-patch
+ * @param {string} match ETag string (optional)
+ * @return {Promise}
+ */
+Client.prototype.patch = function (collection, key, patchOps, match) {
+  assert(collection && key && patchOps, 'Collection, key and JSON object required.')
+  var header = {'Content-Type': 'application/json-patch+json'}
+  if (typeof match == 'string') header['If-Match'] = this._quote(match)
+  return this._patch(this.generateApiUrl([collection, key]), patchOps, header)
 }
 
 
@@ -254,6 +271,16 @@ Client.prototype.newEventBuilder = function () {
 Client.prototype.newEventReader = function () {
   return new EventBuilder()
     .setWrite(false)
+    .setDelegate(this)
+}
+
+/**
+ * Create new patch builder.
+ * @return {PatchBuilder}
+ */
+Client.prototype.newPatchBuilder = function(collection, key) {
+  return new PatchBuilder(collection, key)
+    .setWrite(true)
     .setDelegate(this)
 }
 

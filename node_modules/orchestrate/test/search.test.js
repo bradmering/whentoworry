@@ -1,153 +1,101 @@
-// Copyright 2013 Bowery Software, LLC
+// Copyright 2014 Orchestrate, Inc.
 /**
- * @fileoverview Test search methods.
+ * @fileoverview Test search methods
  */
 
-
 // Module Dependencies.
-var assert = require('assert')
-var nock = require('nock')
-var token = require('./creds').token
-var db = require('../lib-cov/client')(token)
+var assert = require('assert');
+var token = require('./creds').token;
+var db = require('../lib-cov/client')(token);
+var users = require('./testdata');
+var Q = require('kew');
+var util = require('util');
 
-var users = {
-  steve: {
-    "name": "Steve Kaliski",
-    "email": "sjkaliski@gmail.com",
-    "location": "New York",
-    "type": "paid",
-    "gender": "male"
-  }
-}
-
-// Override http requests.
-var fakeOrchestrate = nock('https://api.orchestrate.io/')
-  .get('/v0/users?query=denver')
-  .reply(200, {
-    "results": [],
-    "count": 0
-  })
-  .get('/v0/users?query=new%20york&limit=5&offset=2')
-  .reply(200, {
-    "results": [
-      {
-        "path": {
-          "collection": "users",
-          "key": "sjkaliski@gmail.com",
-          "ref": "0eb6642ca3efde45"
-        },
-        "value": {
-          "name": "Steve Kaliski",
-          "email": "sjkaliski@gmail.com",
-          "location": "New York",
-          "type": "paid",
-          "gender": "male"
-        },
-        "score": 0.10848885029554367
-      }
-    ],
-    "count": 1,
-    "max_score": 0.10848885029554367
-  })
-  .get('/v0/users?query=new%20york&offset=0')
-  .reply(200, {
-    "results": [
-      {
-        "path": {
-          "collection": "users",
-          "key": "sjkaliski@gmail.com",
-          "ref": "0eb6642ca3efde45"
-        },
-        "value": {
-          "name": "Steve Kaliski",
-          "email": "sjkaliski@gmail.com",
-          "location": "New York",
-          "type": "paid",
-          "gender": "male"
-        },
-        "score": 0.10848885029554367
-      }
-    ],
-    "count": 1,
-    "max_score": 0.10848885029554367
-  })
-  .get('/v0/users?query=new%20york&sort=value.name%3Adesc')
-  .reply(200)
-  .delete('/v0/users?force=true')
-  .reply(204)
-  .get('/v0/users?query=new%20york&sort=value.name%3Adesc%2Cvalue.age%3Aasc')
-  .reply(200)
-  .get('/v0/users?query=location%3ANEAR%3A%7Blat%3A1%20lon%3A1%20dist%3A1km%7D&sort=value.name%3Adesc%2Cvalue.location%3Adist%3Aasc')
-  .reply(200)
 
 suite('Search', function () {
-  test('Get value by query', function (done) {
-    db.newSearchBuilder()
-    .collection('users')
-    .limit(5)
-    .offset(2)
-    .query('new york')
-    .then(function (res) {
-      assert.equal(200, res.statusCode)
-      assert.deepEqual(res.body.results[0].value, users.steve)
-      done()
-    })
-  })
+  suiteSetup(function (done) {
+    users.reset(function(res) {
+      if (!res) {
+        users.insertAll(function() {
+          // Give search a chance to index all changes
+          setTimeout(done, 1500);
+        });
+      } else {
+        done(res);
+      }
+    });
+  });
 
-  test('Get value by query with offset 0', function (done) {
+    // Basic search
+  test('Basic search', function (done) {
     db.newSearchBuilder()
-    .collection('users')
-    .offset(0)
-    .query('new york')
-    .then(function (res) {
-      assert.equal(200, res.statusCode)
-      assert.deepEqual(res.body.results[0].value, users.steve)
-      done()
-    })
-  })
+      .collection('users')
+      .query('location: New*')
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        assert.equal(2, res.body.count);
+        done();
+      })
+      .fail(function (res) {
+        done(res);
+      });
+  });
 
-  test('Get value by query and sort by name descending', function (done) {
+  // Search with offset
+  test('Search with offset', function (done) {
     db.newSearchBuilder()
-    .collection('users')
-    .sort('name', 'desc')
-    .query('new york')
-    .then(function (res) {
-      assert.equal(200, res.statusCode)
-      done()
-    })
-  })
+      .collection('users')
+      .offset(2)
+      .query('*')
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        // Order doesn't matter, but there should be only 1 out of the three in
+        // the result
+        assert.equal(1, res.body.count);
+        done();
+      })
+      .fail(function (res) {
+        done(res);
+      });
+  });
 
-  test('Multiple field sort', function (done) {
+  // Search with offset and limit
+  test('Search with offset & limit', function (done) {
     db.newSearchBuilder()
-    .collection('users')
-    .sort('name', 'desc')
-    .sort('age', 'asc')
-    .query('new york')
-    .then(function (res) {
-      assert.equal(200, res.statusCode)
-      done()
-    })
-    .fail(done)
-  })
+      .collection('users')
+      .offset(1)
+      .limit(1)
+      .query('*')
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        // XXX: API inconsistency?
+        //        assert.equal(2, res.body.total_count);
+        assert.equal(1, res.body.count);
+        assert.equal(res.body.next, '/v0/users?limit=1&query=*&offset=2');
+        done();
+      })
+      .fail(function (res) {
+        done(res);
+      });
+  });
 
-  test('Geo queries support', function (done) {
+  // Search and sort
+  test('Search and sort', function (done) {
     db.newSearchBuilder()
-    .collection('users')
-    .sort('name', 'desc')
-    .sort('location', 'dist:asc')
-    .query('location:NEAR:{lat:1 lon:1 dist:1km}')
-    .then(function (res) {
-      assert.equal(200, res.statusCode)
-      done()
-    })
-    .fail(done)
-  })
+      .collection('users')
+      .sort('name', 'desc')     // Reverse-alpha
+      .query('New York')
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        assert.equal(2, res.body.results.length);
+        assert.equal(users.steve.email, res.body.results[0].path.key);
+        assert.equal(users.david.email, res.body.results[1].path.key);
+        done();
+      })
+      .fail(function (res) {
+        done(res);
+      });
+  });
 
-  test('Calling search() directly on the client w/o options', function (done) {
-    db.search('users', 'denver').then(function (res) {
-      assert.equal(200, res.statusCode);
-      assert.equal(res.body.count, 0);
-      done()
-    })
-  })
-})
+  // Geo-search
+});

@@ -1,208 +1,178 @@
-// Copyright 2013 Bowery Software, LLC
+// Copyright 2014 Orchestrate, Inc.
 /**
  * @fileoverview Test Key-Value methods.
  */
 
 
 // Module Dependencies.
-var assert = require('assert')
-var nock = require('nock')
-var token = require('./creds').token
-var db = require('../lib-cov/client')(token)
-
-// Mock data.
-var users = {
-  steve: {
-    "name": "Steve Kaliski",
-    "email": "sjkaliski@gmail.com",
-    "location": "New York",
-    "type": "paid",
-    "gender": "male"
-  },
-  david: {
-    "name": "David Byrd",
-    "email": "byrd@bowery.io",
-    "location": "New York",
-    "type": "paid",
-    "gender": "male"
-  },
-  kelsey: {
-    "name": "Kelsey Jarblenkins",
-    "email": "kelsey@jarblenkins.com",
-    "location": "Boston, MA",
-    "type": "free",
-    "gender": "genderqueer"
-  }
-}
-
-var subDocs = {
-  steve: {
-    "name": "Stephen Kaliski"
-  }
-}
-
-var refsList = {
-  "count": 3,
-  "results": [
-    {
-      "path": {
-        "collection": "users",
-        "key": "sjkaliski@gmail.com",
-        "ref": "cbb48f9464612f20"
-      },
-      "value": {},
-      "reftime": 1400085119216
-    },
-    {
-      "path": {
-        "collection": "users",
-        "key": "sjkaliski@gmail.com",
-        "ref": "",
-        "tombstone": true
-      },
-      "reftime": 1400085117084
-    },
-    {
-      "path": {
-        "collection": "users",
-        "key": "sjkaliski@gmail.com",
-        "ref": "cbb48f9464612f20"
-      },
-      "value": {},
-      "reftime": 1400085084739
-    }
-  ]
-}
-
-var listResponse = {
-  "count": 1,
-  "next": "/v0/users?limit=2&afterKey=002",
-  "results": [{value: users.steve}]
-}
-
-var page2Response = {
-  "count": 1,
-  "results": [{value: users.david}]
-}
-
-// Override http requests.
-var fakeOrchestrate = nock('https://api.orchestrate.io/')
-  .get('/v0/users/sjkaliski%40gmail.com')
-  .reply(200, users.steve)
-  .get('/v0/users/sjkaliski%40gmail.com/refs/o231ou3hf')
-  .reply(200, users.steve)
-  .get('/v0/users/sjkaliski%40gmail.com/refs')
-  .reply(200, refsList, {'Link':'</v0/users/sjkaliski%40gmail.com/refs?limit=2&afterKey=002>; rel="next"'})
-  .get('/v0/users')
-  .reply(200, listResponse, {'Link':'</v0/users?limit=2&afterKey=002>; rel="next"'})
-  .post('/v0/users')
-  .reply(201)
-  .put('/v0/users/byrd%40bowery.io')
-  .reply(201)
-  .put('/v0/users/byrd%40bowery.io')
-  .reply(201)
-  .patch('/v0/users/sjkaliski%40gmail.com')
-  .reply(201)
-  .delete('/v0/users/byrd%40bowery.io')
-  .reply(204)
-  .delete('/v0/users/byrd%40bowery.io?purge=true')
-  .reply(204)
-  .get('/v0/users?afterKey=002')
-  .reply(200, page2Response)
+var assert = require('assert');
+var token = require('./creds').token;
+var db = require('../lib-cov/client')(token);
+var users = require('./testdata');
+var util = require('util');
 
 suite('Key-Value', function () {
-  test('Get value by key', function (done) {
-    db.get('users', 'sjkaliski@gmail.com')
-    .then(function (res) {
-      assert.equal(200, res.statusCode)
-      assert.deepEqual(users.steve, res.body)
-      done()
-    })
-  })
+  suiteSetup(function(done) {
+    users.reset(done);
+  });
 
-  test('Get value by key and ref', function (done) {
-    db.get('users', 'sjkaliski@gmail.com', 'o231ou3hf')
-    .then(function (res) {
-      assert.equal(200, res.statusCode)
-      assert.deepEqual(users.steve, res.body)
-      done()
-    })
-  })
+  test('Put/Get roundtrip', function (done) {
+    db.put('users', users.steve.email, users.steve)
+      .then(function (res) {
+        assert.equal(201, res.statusCode);
+        return db.get('users', users.steve.email);
+      })
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        assert.deepEqual(users.steve, res.body);
+        done();
+      })
+      .fail(function (e) {
+        done(e);
+      });
+  });
 
-  test('List refs for a key', function (done) {
-    db.list_refs('users', 'sjkaliski@gmail.com')
-    .then(function (res) {
-      assert.equal(200, res.statusCode)
-      assert.deepEqual(users.steve.email, res.body.results[0].path.key)
-      assert.equal(true, typeof res.links.next.get == 'function')
-      done()
-    })
-  })
+  test('Get by ref', function(done) {
+    db.get('users', users.steve.email, '0eb6642ca3efde45')
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        assert.deepEqual(users.steve, res.body);
+        done();
+      })
+      .fail(function (e) {
+        done(e);
+      });
+  });
 
-  test('Get list of values by collection name', function (done) {
-    db.list('users')
-    .then(function (res) {
-      assert.equal(200, res.statusCode)
-      assert.deepEqual(users.steve, res.body.results[0].value)
-      assert.equal(true, typeof res.links.next.get == 'function')
-      done()
-    })
-  })
+  test('List refs for a key', function(done) {
+    db.put('users', users.steve.email, users.steve_v1)
+      .then(function (res) {
+        assert.equal(201, res.statusCode);
+        return db.list_refs('users', users.steve.email);
+      })
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        assert.equal(2, res.body.count);
+        assert.equal("e85762917a99acce", res.body.results[0].path.ref);
+        assert.equal("0eb6642ca3efde45", res.body.results[1].path.ref);
+        done();
+      })
+    .fail(function (e) {
+      done(e);
+    });
+  });
 
-  test('Store value without key', function (done) {
-    db.post('users', users.kelsey)
+  test('Get list of values from a collection', function(done) {
+    db.list('users', {limit:1})
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        assert.equal(1, res.body.count);
+        assert.deepEqual(users.david, res.body.results[0].value);
+        assert.equal('/v0/users?limit=1&afterKey=byrd@bowery.io', res.body.next);
+        return db.list('users', {limit:1, afterKey:users.david.email});
+      })
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        assert.equal(1, res.body.count);
+        assert.deepEqual(users.steve_v1, res.body.results[0].value);
+        assert.equal(undefined, res.body.next);
+        return db.list('users', {limit:1, beforeKey:users.steve.email});
+      })
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        assert.equal(1, res.body.count);
+        assert.deepEqual(users.david, res.body.results[0].value);
+        // There is no next in this situation, since there are only two values
+        // in the collection and the beforeKey predicate has restricted the list
+        // to only the first item
+        assert.equal(undefined, res.body.next);
+        done();
+      })
+    .fail(function (e) {
+      done(e);
+    });
+  });
+
+  test('Partial updates: merge', function(done) {
+    db.merge('users', users.steve.email, {type: "consultant"})
+      .then(function (res) {
+        assert.equal(201, res.statusCode);
+        return db.get('users', users.steve.email);
+      })
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        assert.deepEqual(users.steve_v2, res.body);
+        done();
+      })
+      .fail(function (e) {
+        done(e);
+      });
+  });
+
+  test('Partial updates: patch', function(done) {
+    db.newPatchBuilder('users', users.steve.email)
+      .add("type", "salaried")
+      .copy("type", "paytype")
+      .test("paytype", "salaried")
+      .remove("paytype")
+      .apply()
+      .then(function (res) {
+        assert.equal(201, res.statusCode);
+        return db.get('users', users.steve.email);
+      })
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        assert.deepEqual(users.steve_v3, res.body);
+        done();
+      })
+      .fail(function (e) {
+        done(e);
+      });
+  });
+
+  test('If-None-Match put', function(done) {
+    db.put('users', users.david.email, users.david, false)
+      .fail(function (res) {
+        assert.equal(412, res.statusCode);
+        return db.put('users', users.kelsey.email, users.kelsey, false);
+      })
+      .then(function (res) {
+        assert.equal(201, res.statusCode);
+        done();
+      })
+      .fail(function (e) {
+        done(e);
+      });
+  });
+
+  test('If-Match put', function(done) {
+    db.put('users', users.kelsey.email, users.kelsey, 'badetag')
+      .fail(function (res) {
+        assert.equal(400, res.statusCode);
+        return db.put('users', users.kelsey.email, users.kelsey_v1, 'c333c79ab9169d1f');
+      })
     .then(function (res) {
       assert.equal(201, res.statusCode);
       done();
+    })
+    .fail(function (e) {
+      done(e);
     });
-  })
+  });
 
-  test('Store value at key', function (done) {
-    db.put('users', 'byrd@bowery.io', users.david)
-    .then(function (res) {
-      assert.equal(201, res.statusCode)
-      done()
-    })
-  })
+  test('If-Match patch', function(done) {
+    db.get('users', users.steve.email)
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        assert.deepEqual(users.steve_v3, res.body);
+        return db.newPatchBuilder('users', users.steve.email)
+          .add("type", "consultant")
+          .apply("00242d00737faf60");
+      })
+      .fail(function (res) {
+        assert.equal(412, res.statusCode);
+        done();
+      });
+  });
+});
 
-  test('Store value at key with conditional', function (done) {
-    db.put('users', 'byrd@bowery.io', users.david, false)
-    .then(function (res) {
-      assert.equal(201, res.statusCode)
-      done()
-    })
-  })
-
-  test('Update sub doc at key', function (done) {
-    db.patch('users', 'sjkaliski@gmail.com', subDocs.steve)
-    .then(function (res) {
-      assert.equal(201, res.statusCode)
-      done()
-    })
-  })
-
-  test('Remove value by key', function (done) {
-    db.remove('users', 'byrd@bowery.io')
-    .then(function (res) {
-      assert.equal(204, res.statusCode)
-      done()
-    })
-  })
-
-  test('Remove value by key and purge', function (done) {
-    db.remove('users', 'byrd@bowery.io', true)
-    .then(function (res) {
-      assert.equal(204, res.statusCode)
-      done()
-    })
-  })
-
-  test('Request collection items afterKey', function (done) {
-    db.list('users', {afterKey:'002'})
-    .then(function (res) {
-      assert.equal(200, res.statusCode)
-      assert.deepEqual(users.david, res.body.results[0].value)
-      done()
-    })
-  })
-})

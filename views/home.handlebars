@@ -1,29 +1,26 @@
 <!-- views/home.handlebars -->
-{{#if user}}
-  <div class="jumbotron">
-    <h1>Orchestrate User Authentication</h1>
-    <p>Below is your profile information!</p>
-  </div>
-  <div class="panel panel-default">
-    <div class="panel-heading">
-      <h3 class="panel-title">Profile Information</h3>
+    <div class="jumbotron">
+        <div class="container">
+            <h2>When to Worry!</h2>
+            <p>This is a small <strong>beta</strong> application designed to allow </p>
+        </div>
     </div>
-    <div class="panel-body">
-      <p>Username: {{user.username}}</p>
-      <p>Avatar: <img src="{{user.avatar}}"/></p>
+
+    <div class="row">
+        <div class="col-lg-12">
+            <form id="local-sign-in" class="form" action="/login" method="post">
+                <div>
+                    <p></p>
+                    <label>Username:</label>
+                    <input type="text" name="username"/>
+                </div>
+                <div>
+                    <label>Password:</label>
+                    <input type="password" name="password"/>
+                </div>
+                <div>
+                    <input type="submit" class="btn btn-primary btn-sm" value="Log In"/>
+                </div>
+          </form>
+        </div>
     </div>
-  </div>
-
-{{else}}
-  <div class="jumbotron">
-    <h1>Orchestrate User Authentication</h1>
-    <p>Sign in and view your profile!</p>
-    <p>
-      <a href="/signin" class="btn btn-primary btn-lg" role="button">
-        <span class="glyphicon glyphicon-user"></span> 
-        Sign in!
-      </a>
-    </p>
-  </div>
-
-{{/if}}

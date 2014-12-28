@@ -67,20 +67,6 @@ db.put('collection', 'key', {
 })
 ```
 
-To update a sub document:
-
-```javascript
-db.patch('collection', 'key', {
-  "name": "Stephen Kaliski"
-})
-.then(function (result) {
-  
-})
-.fail(function (err) {
-  
-})
-```
-
 Or, setting a value and allowing the server to generate a key:
 
 ```javascript
@@ -96,6 +82,36 @@ db.post('collection', {
 
 })
 ```
+
+To merge (or update) new values into an existing key, construct a partial document with the desired changes and then use `merge`:
+
+```javascript
+db.merge('collection', 'key', {
+  "name": "Stephen Kaliski"
+})
+.then(function (result) {
+  
+})
+.fail(function (err) {
+  
+})
+```
+
+Alternatively, you can apply a series of controlled changes to a key by constructing a patch:
+
+```javascript
+db.newPatchBuilder('collection', 'key')
+  .add('age', 25)
+  .replace('hometown', 'NY')
+  .apply()
+  .then(function (result) {
+      // All changes were applied successfully
+  })
+  .fail(function (err) {
+     // No changes were applied
+  })
+```
+
 
 Orchestrate also supports [conditional put statements](https://orchestrate.io/docs/api/#key/value/put-(create/update)) that determines whether or not the store operation will occur. `db.put` takes a fourth argument `match` which is either the `ref` value or `false`. If a ref value is provided an `update` will occur if there is a valid match, if false is provided, a `create` will occur if there is no match.
 

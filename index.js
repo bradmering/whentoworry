@@ -10,68 +10,35 @@ var express             = require('express'),
     LocalStrategy       = require('passport-local'),
     TwitterStrategy     = require('passport-twitter'),
     GoogleStrategy      = require('passport-google'),
-    FacebookStrategy    = require('passport-facebook');
-
-// New Code
-var mongo = require('mongodb');
-var monk = require('monk');
-var db = monk('localhost:27017/nodetest1');
+    Mailgun             = require('mailgun-js'),
+    FacebookStrategy    = require('passport-facebook'),
+    mongo               = require('mongodb'),
+    helmet              = require('helmet'),
+    mongoose            = require('mongoose'),
+    session             = require('express-session'),
+    MongoStore          = require('connect-mongo')(session);
 
 //We will be creating these two files shortly
- var config = require('./config.js'), //config file contains all tokens and other private info
-      funct = require('./functions.js'); //funct file contains our helper functions for our Passport and database work
+var config    = require('./config.js'),
+    funct     = require('./functions.js'), //funct file contains our helper functions for our Passport and database work
+    cron      = require('./cron.js'), //funct file contains our helper functions for our Passport and database work
+    Trips     = require('./models/Trips.js')
+    Users     = require('./models/Users.js');
+    
+var twilio = require('twilio')(config.sms.sid, config.sms.token);
 
-var app = express();
-
-//===============PASSPORT===============
-
-//===============PASSPORT=================
-// Use the LocalStrategy within Passport to login/”signin” users.
-passport.use('local-signin', new LocalStrategy(
-    {passReqToCallback : true}, //allows us to pass back the request to the callback
-    function(req, username, password, done) {
-        funct.localAuth(username, password)
-            .then(function (user) {
-                if (user) {
-                    console.log("LOGGED IN AS: " + user.username);
-                    req.session.success = 'You are successfully logged in ' + user.username + '!';
-                    done(null, user);
-                }
-                if (!user) {
-                    console.log("COULD NOT LOG IN");
-                    req.session.error = 'Could not log user in. Please try again.'; //inform user could not log them in
-                    done(null, user);
-                }
-        }).fail(function (err){
-            console.log(err.body);
-        });
-    }
-));
-// Use the LocalStrategy within Passport to register/"signup" users.
-passport.use('local-signup', new LocalStrategy(
-    {passReqToCallback : true}, //allows us to pass back the request to the callback
-    function(req, username, password, done) {
-        funct.localReg(username, password)
-            .then(function (user) {
-                if (user) {
-                    console.log("REGISTERED: " + user.username);
-                    req.session.success = 'You are successfully registered and logged in ' + user.username + '!';
-                    done(null, user);
-                }
-                if (!user) {
-                    console.log("COULD NOT REGISTER");
-                    req.session.error = 'That username is already in use, please try a different one.'; //inform user could not log them in
-                    done(null, user);
-                }
-        }).fail(function (err){
-            console.log(err.body);
-        });
-    }
-));
+var app     = express(),
+    router  = express.Router();
 
 //===============EXPRESS================
 // Configure Express
 app.use(logger('combined'));
+
+app.use(session({
+    secret: config.session.secret,
+    store: new MongoStore()
+}));
+
 app.use(cookieParser());
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
@@ -79,23 +46,11 @@ app.use(methodOverride('X-HTTP-Method-Override'));
 app.use(session({secret: 'supernova', saveUninitialized: true, resave: true}));
 app.use(passport.initialize());
 app.use(passport.session());
+app.use(express.static(__dirname + '/public'));
+app.use(helmet());
 
 // Session-persisted message middleware
 app.use(function(req, res, next){
-    var err = req.session.error,
-        msg = req.session.notice,
-        success = req.session.success;
-
-    delete req.session.error;
-    delete req.session.success;
-    delete req.session.notice;
-    
-    req.db = db;
-    
-    if (err) res.locals.error = err;
-    if (msg) res.locals.notice = msg;
-    if (success) res.locals.success = success;
-
     next();
 });
 
@@ -109,49 +64,74 @@ app.set('view engine', 'handlebars');
 
 //===============ROUTES===============
 
-//displays our homepage
-app.get('/', function(req, res){
-    res.render('home', {user: req.user});
-});
-
-/* GET Userlist page. */
-app.get('/list', function(req, res) {
-    var db = req.db;
-    var collection = db.get('trips');
-    collection.find({},{},function(e,docs){
-        res.render('list', {
-            "list" : docs
-        });
+//Static pages
+router.route('/')
+    .get(function(req, res){
+        res.render('home', {user: req.user});
     });
-});
 
-//displays our signup page
-app.get('/signin', function(req, res){
-    res.render('signin');
-});
-
-//sends the request through our local signup strategy, and if successful takes user to homepage, otherwise returns then to signin page
-app.post('/local-reg', passport.authenticate('local-signup', {
-        successRedirect: '/',
-        failureRedirect: '/signin'
+router.route('/about')
+    .get(function(req, res){
+        res.render('about', {user: req.user});
+    });
+    
+router.route('/contact')
+    .get(function(req, res){
+        res.render('contact', {user: req.user});
+    });
+    
+router.route('/login')
+    .get(function(req, res){
+        res.redirect('/');
     })
-);
+    .post(function(req, res){
+        var username = req.body.article;
+        var password = req.body.password;
+        console.log(username);
+        console.log(password);
+    });
 
-//sends the request through our local login/signin strategy, and if successful takes user to homepage, otherwise returns then to signin page
-app.post('/login', passport.authenticate('local-signin', { 
-        successRedirect: '/',
-        failureRedirect: '/signin'
+router.route('/profile')
+    .get(function(req, res){
+        console.log('view profile');
     })
-);
+    .post(function(req, res){
+        console.log('update profile');
+    });
+    
+router.route('/expedition')
+    .get(function(req, res){
+        res.redirect('/');
+    });  
+  
+router.route('/expedition/list')
+    .get(function(req, res){
+        console.log('view trips');
+    });
+    
+router.route('/expedition/new')
+    .get(function(req, res){
+        console.log('new trip form');
+    })
+    .post(function(req, res){
+        console.log('creating a new trip');
+    })
+    .put(function(req, res){
+        console.log('creating a new trip');
+    });
+    
+router.route('/expedition/:id')
+    .get(function(req, res){
+        console.log('view trip '+req.params.id);
+    })
+    .post(function(req, res){
+        console.log('update trip '+req.params.id);
+    })
+    .delete(function(req, res){
+        console.log('delete trip '+req.params.id);
+    });
 
-//logs user out of site, deleting them from the session, and returns to homepage
-app.get('/logout', function(req, res){
-    var name = req.user.username;
-    console.log("LOGGIN OUT " + req.user.username)
-    req.logout();
-    res.redirect('/');
-    req.session.notice = "You have successfully been logged out " + name + "!";
-});
+app.use('/', router);
 
 //===============PORT=================
 var port = process.env.PORT || 5000; //select your port or let it pull from your .env file

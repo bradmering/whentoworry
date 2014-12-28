@@ -1,116 +1,89 @@
-// Copyright 2013 Bowery Software, LLC
+// Copyright 2014 Orchestrate, Inc.
 /**
- * @fileoverview Test Search methods.
+ * @fileoverview Test graph methods
  */
 
-
 // Module Dependencies.
-var assert = require('assert')
-var nock = require('nock')
-var token = require('./creds').token
-var db = require('../lib-cov/client')(token)
+var assert = require('assert');
+var token = require('./creds').token;
+var db = require('../lib-cov/client')(token);
+var users = require('./testdata');
+var Q = require('kew');
+var util = require('util');
 
-var movies = {
-  superbad: {
-    "title": "Superbad",
-    "year": 2007
-  }
-}
+var r = function(collection, from, to, kind) {
+  return db.newGraphBuilder()
+    .create()
+    .from(collection, from)
+    .related(kind)
+    .to(collection, to);
+};
 
-var friends = {
-  david: {
-    "name": "David Byrd",
-    "age": 20
-  }
-}
-
-// Override http requests.
-var fakeOrchestrate = nock('https://api.orchestrate.io')
-  .get('/v0/users/sjkaliski%40gmail.com/relations/likes')
-  .reply(200, {
-    "results": [
-      {
-        "path": {
-          "collection": "movies",
-          "key": "Superbad",
-          "ref": "56e22c26346f9015"
-        },
-        "value": {
-          "title": "Superbad",
-           "year": 2007
-        }
-      }
-    ],
-    "count": 1
-  })
-  .get('/v0/users/sjkaliski%40gmail.com/relations/friends/friends?limit=1&offset=2')
-  .reply(200, {
-    "results": [
-      {
-        "path": {
-          "collection": "friends",
-          "key": "david@bowery.io",
-          "ref": "56e22c26346f9016"
-        },
-        "value": {
-          "name": "David Byrd",
-          "age": 20
-        }
-      }
-    ],
-    "count": 1
-  })
-  .put('/v0/users/sjkaliski%40gmail.com/relation/likes/movies/Superbad')
-  .reply(204)
-  .delete('/v0/users/sjkaliski%40gmail.com/relation/likes/movies/Superbad?purge=true')
-  .reply(204)
 
 suite('Graph', function () {
-  test('Get graph relationship', function (done) {
+  suiteSetup(function (done) {
+    users.reset(function(res) {
+      if (!res) {
+        users.insertAll(done);
+      } else {
+        done(res);
+      }
+    });
+  });
+
+  test('Create graph relationships', function(done) {
+     var relations = [r('users', users.steve.email, users.kelsey.email, "friend"),
+                      r('users', users.kelsey.email, users.david.email, "friend")];
+
+    Q.all(relations)
+      .then(function (res) {
+        assert.equal(2, res.length);
+        for (var i in res) {
+          assert.equal(204, res[i].statusCode);
+        }
+        done();
+      })
+      .fail(function (res) {
+        done(res);
+      });
+  });
+
+  test('Traverse graph relationship', function(done) {
     db.newGraphReader()
-    .get()
-    .from('users', 'sjkaliski@gmail.com')
-    .related('likes')
-    .then(function (res) {
-      assert.deepEqual(res.body.results[0].value, movies.superbad)
-      done()
-    })
-  })
+      .get()
+      .from('users', users.steve.email)
+      .related('friend', 'friend')
+      .then(function (res) {
+        assert.equal(200, res.statusCode);
+        assert.deepEqual(users.david, res.body.results[0].value);
+        done();
+      })
+      .fail(function (res) {
+        done(res);
+      });
+  });
 
-  test('Get distant graph relationship', function (done) {
-    db.newGraphReader()
-    .get()
-    .limit(1)
-    .offset(2)
-    .from('users', 'sjkaliski@gmail.com')
-    .related('friends', 'friends')
-    .then(function (res) {
-      assert.deepEqual(res.body.results[0].value, friends.david)
-      done()
-    })
-  })
-
-  test('Create graph relationship', function (done) {
+  test('Delete graph relationship', function(done) {
     db.newGraphBuilder()
-    .create()
-    .from('users', 'sjkaliski@gmail.com')
-    .related('likes')
-    .to('movies', 'Superbad')
-    .then(function (res) {
-      assert.equal(res.statusCode, 204)
-      done()
-    })
-  })
+      .remove()
+      .from('users', users.kelsey.email)
+      .related('friend')
+      .to('users', users.david.email)
+      .then(function (res) {
+        assert.equal(res.statusCode, 204);
+        return db.newGraphReader()
+          .get()
+          .from('users', users.steve.email)
+          .related('friend', 'friend');
+      })
+      .then(function (res) {
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.body.count, 0);
+        done();
+      })
+      .fail(function (res) {
+        done(res);
+      });
+  });
 
-  test('Delete a graph relationship', function (done) {
-    db.newGraphBuilder()
-    .remove()
-    .from('users', 'sjkaliski@gmail.com')
-    .related('likes')
-    .to('movies', 'Superbad')
-    .then(function (res) {
-      assert.equal(res.statusCode, 204)
-      done()
-    })
-  })
-})
+});
